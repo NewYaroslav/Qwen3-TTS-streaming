@@ -17,16 +17,15 @@ import base64
 import io
 import urllib.request
 from dataclasses import dataclass
+from importlib import import_module
 from typing import Any, Dict, Generator, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
-import librosa
 import numpy as np
-import soundfile as sf
 import torch
-from transformers import AutoConfig, AutoModel, AutoProcessor
 
-from ..core.models import Qwen3TTSConfig, Qwen3TTSForConditionalGeneration, Qwen3TTSProcessor
+from ..core.models.configuration_qwen3_tts import Qwen3TTSConfig
+from ..core.models.modeling_qwen3_tts import Qwen3TTSForConditionalGeneration
 
 AudioLike = Union[
     str,                     # wav path, URL, base64
@@ -35,6 +34,24 @@ AudioLike = Union[
 ]
 
 MaybeList = Union[Any, List[Any]]
+
+
+def _librosa():
+    return import_module("librosa")
+
+
+def _soundfile():
+    return import_module("soundfile")
+
+
+def _transformers_auto_classes():
+    transformers = import_module("transformers")
+    return transformers.AutoConfig, transformers.AutoModel, transformers.AutoProcessor
+
+
+def _qwen_processor_class():
+    module = import_module("qwen_tts.core.models.processing_qwen3_tts")
+    return module.Qwen3TTSProcessor
 
 
 @dataclass
@@ -105,17 +122,20 @@ class Qwen3TTSModel:
             Qwen3TTSModel:
                 Wrapper instance containing `model`, `processor`, and generation defaults.
         """
-        AutoConfig.register("qwen3_tts", Qwen3TTSConfig)
-        AutoModel.register(Qwen3TTSConfig, Qwen3TTSForConditionalGeneration)
-        AutoProcessor.register(Qwen3TTSConfig, Qwen3TTSProcessor)
+        auto_config, auto_model, auto_processor = _transformers_auto_classes()
+        qwen_processor = _qwen_processor_class()
 
-        model = AutoModel.from_pretrained(pretrained_model_name_or_path, **kwargs)
+        auto_config.register("qwen3_tts", Qwen3TTSConfig)
+        auto_model.register(Qwen3TTSConfig, Qwen3TTSForConditionalGeneration)
+        auto_processor.register(Qwen3TTSConfig, qwen_processor)
+
+        model = auto_model.from_pretrained(pretrained_model_name_or_path, **kwargs)
         if not isinstance(model, Qwen3TTSForConditionalGeneration):
             raise TypeError(
                 f"AutoModel returned {type(model)}, expected Qwen3TTSForConditionalGeneration. "
             )
 
-        processor = AutoProcessor.from_pretrained(pretrained_model_name_or_path, fix_mistral_regex=True,)
+        processor = auto_processor.from_pretrained(pretrained_model_name_or_path, fix_mistral_regex=True,)
 
         generate_defaults = model.generate_config
         return cls(model=model, processor=processor, generate_defaults=generate_defaults)
@@ -265,13 +285,13 @@ class Qwen3TTSModel:
             with urllib.request.urlopen(x) as resp:
                 audio_bytes = resp.read()
             with io.BytesIO(audio_bytes) as f:
-                audio, sr = sf.read(f, dtype="float32", always_2d=False)
+                audio, sr = _soundfile().read(f, dtype="float32", always_2d=False)
         elif self._is_probably_base64(x):
             wav_bytes = self._decode_base64_to_wav_bytes(x)
             with io.BytesIO(wav_bytes) as f:
-                audio, sr = sf.read(f, dtype="float32", always_2d=False)
+                audio, sr = _soundfile().read(f, dtype="float32", always_2d=False)
         else:
-            audio, sr = librosa.load(x, sr=None, mono=True)
+            audio, sr = _librosa().load(x, sr=None, mono=True)
 
         if audio.ndim > 1:
             audio = np.mean(audio, axis=-1)
@@ -495,7 +515,7 @@ class Qwen3TTSModel:
 
             wav_resample = wav
             if sr != self.model.speaker_encoder_sample_rate:
-                wav_resample = librosa.resample(y=wav_resample.astype(np.float32), 
+                wav_resample = _librosa().resample(y=wav_resample.astype(np.float32),
                                            orig_sr=int(sr), 
                                            target_sr=self.model.speaker_encoder_sample_rate)
 

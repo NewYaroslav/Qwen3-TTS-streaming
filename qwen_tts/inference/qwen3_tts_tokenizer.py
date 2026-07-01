@@ -16,22 +16,13 @@
 import base64
 import io
 import urllib.request
+from importlib import import_module
 from typing import List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
-import librosa
 import numpy as np
-import soundfile as sf
 import torch
 from torch.nn.utils.rnn import pad_sequence
-from transformers import AutoConfig, AutoFeatureExtractor, AutoModel
-
-from ..core import (
-    Qwen3TTSTokenizerV1Config,
-    Qwen3TTSTokenizerV1Model,
-    Qwen3TTSTokenizerV2Config,
-    Qwen3TTSTokenizerV2Model,
-)
 
 AudioInput = Union[
     str,  # wav path, or base64 string
@@ -39,6 +30,29 @@ AudioInput = Union[
     List[str],
     List[np.ndarray],
 ]
+
+
+def _librosa():
+    return import_module("librosa")
+
+
+def _soundfile():
+    return import_module("soundfile")
+
+
+def _transformers_auto_classes():
+    transformers = import_module("transformers")
+    return transformers.AutoConfig, transformers.AutoFeatureExtractor, transformers.AutoModel
+
+
+def _tokenizer_classes():
+    core = import_module("qwen_tts.core")
+    return (
+        core.Qwen3TTSTokenizerV1Config,
+        core.Qwen3TTSTokenizerV1Model,
+        core.Qwen3TTSTokenizerV2Config,
+        core.Qwen3TTSTokenizerV2Model,
+    )
 
 
 class Qwen3TTSTokenizer:
@@ -78,14 +92,22 @@ class Qwen3TTSTokenizer:
         """
         inst = cls()
 
-        AutoConfig.register("qwen3_tts_tokenizer_25hz", Qwen3TTSTokenizerV1Config)
-        AutoModel.register(Qwen3TTSTokenizerV1Config, Qwen3TTSTokenizerV1Model)
+        auto_config, auto_feature_extractor, auto_model = _transformers_auto_classes()
+        (
+            tokenizer_v1_config,
+            tokenizer_v1_model,
+            tokenizer_v2_config,
+            tokenizer_v2_model,
+        ) = _tokenizer_classes()
 
-        AutoConfig.register("qwen3_tts_tokenizer_12hz", Qwen3TTSTokenizerV2Config)
-        AutoModel.register(Qwen3TTSTokenizerV2Config, Qwen3TTSTokenizerV2Model)
+        auto_config.register("qwen3_tts_tokenizer_25hz", tokenizer_v1_config)
+        auto_model.register(tokenizer_v1_config, tokenizer_v1_model)
 
-        inst.feature_extractor = AutoFeatureExtractor.from_pretrained(pretrained_model_name_or_path)
-        inst.model = AutoModel.from_pretrained(pretrained_model_name_or_path, **kwargs)
+        auto_config.register("qwen3_tts_tokenizer_12hz", tokenizer_v2_config)
+        auto_model.register(tokenizer_v2_config, tokenizer_v2_model)
+
+        inst.feature_extractor = auto_feature_extractor.from_pretrained(pretrained_model_name_or_path)
+        inst.model = auto_model.from_pretrained(pretrained_model_name_or_path, **kwargs)
         inst.config = inst.model.config
 
         inst.device = getattr(inst.model, "device", None)
@@ -141,19 +163,19 @@ class Qwen3TTSTokenizer:
             with urllib.request.urlopen(x) as resp:
                 audio_bytes = resp.read()
             with io.BytesIO(audio_bytes) as f:
-                audio, sr = sf.read(f, dtype="float32", always_2d=False)
+                audio, sr = _soundfile().read(f, dtype="float32", always_2d=False)
         elif self._is_probably_base64(x):
             wav_bytes = self._decode_base64_to_wav_bytes(x)
             with io.BytesIO(wav_bytes) as f:
-                audio, sr = sf.read(f, dtype="float32", always_2d=False)
+                audio, sr = _soundfile().read(f, dtype="float32", always_2d=False)
         else:
-            audio, sr = librosa.load(x, sr=None, mono=True)
+            audio, sr = _librosa().load(x, sr=None, mono=True)
 
         if audio.ndim > 1:
             audio = np.mean(audio, axis=-1)
 
         if sr != target_sr:
-            audio = librosa.resample(y=audio, orig_sr=sr, target_sr=target_sr)
+            audio = _librosa().resample(y=audio, orig_sr=sr, target_sr=target_sr)
 
         return audio.astype(np.float32)
 
@@ -201,7 +223,7 @@ class Qwen3TTSTokenizer:
             if a.ndim > 1:
                 a = np.mean(a, axis=-1)
             if int(sr) != target_sr:
-                a = librosa.resample(y=a.astype(np.float32), orig_sr=int(sr), target_sr=target_sr)
+                a = _librosa().resample(y=a.astype(np.float32), orig_sr=int(sr), target_sr=target_sr)
             out.append(a.astype(np.float32))
         return out
 

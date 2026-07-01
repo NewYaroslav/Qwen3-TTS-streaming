@@ -17,13 +17,13 @@
 import json
 import os
 from dataclasses import dataclass
-from typing import Callable, Optional, Generator
+from importlib import import_module
+from typing import Callable, Optional, Generator, Unpack
 
 import huggingface_hub
 import numpy as np
 import torch
 from huggingface_hub import snapshot_download
-from librosa.filters import mel as librosa_mel_fn
 from torch import nn
 from torch.nn import functional as F
 from transformers.activations import ACT2FN
@@ -33,14 +33,12 @@ from transformers.integrations import use_kernel_forward_from_hub
 from transformers.masking_utils import (create_causal_mask,
                                         create_sliding_window_causal_mask)
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
-from transformers.modeling_layers import GradientCheckpointingLayer
 from transformers.modeling_outputs import (BaseModelOutputWithPast,
                                            CausalLMOutputWithPast, ModelOutput)
 from transformers.modeling_rope_utils import (ROPE_INIT_FUNCTIONS,
                                               dynamic_rope_update)
 from transformers.modeling_utils import (ALL_ATTENTION_FUNCTIONS,
                                          PreTrainedModel)
-from transformers.processing_utils import Unpack
 from transformers.utils import can_return_tuple, logging
 from transformers.utils.hub import cached_file
 
@@ -51,6 +49,12 @@ from .configuration_qwen3_tts import (Qwen3TTSConfig,
                                       Qwen3TTSTalkerConfig)
 
 logger = logging.get_logger(__name__)
+
+
+class GradientCheckpointingLayer(nn.Module):
+    """Minimal inference-compatible replacement for Transformers' layer base."""
+
+    gradient_checkpointing = False
 
 
 def _top_k_top_p_filtering(logits: torch.Tensor, top_k: int = 0, top_p: float = 1.0) -> torch.Tensor:
@@ -469,6 +473,11 @@ class Qwen3TTSSpeakerEncoder(torch.nn.Module):
 def dynamic_range_compression_torch(x, C=1, clip_val=1e-5):
     return torch.log(torch.clamp(x, min=clip_val) * C)
 
+
+def _librosa_mel_fn():
+    return import_module("librosa.filters").mel
+
+
 def mel_spectrogram(
     y: torch.Tensor,
     n_fft: int,
@@ -505,7 +514,7 @@ def mel_spectrogram(
 
     device = y.device
 
-    mel = librosa_mel_fn(
+    mel = _librosa_mel_fn()(
         sr=sampling_rate, n_fft=n_fft, n_mels=num_mels, fmin=fmin, fmax=fmax
     )
 

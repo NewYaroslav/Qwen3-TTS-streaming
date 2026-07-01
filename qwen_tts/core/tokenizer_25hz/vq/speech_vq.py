@@ -18,12 +18,12 @@ import copy
 import torch
 import operator
 import onnxruntime
+from importlib import import_module
 
 import torch.nn as nn
 import torch.nn.functional as F
 import torchaudio.compliance.kaldi as kaldi
 
-from librosa.filters import mel as librosa_mel_fn
 from itertools import accumulate
 from typing import List
 from torch import Tensor
@@ -38,6 +38,11 @@ def dynamic_range_compression_torch(x, C=1, clip_val=1e-5):
 def spectral_normalize_torch(magnitudes):
     output = dynamic_range_compression_torch(magnitudes)
     return output
+
+
+def _librosa_mel_fn():
+    return import_module("librosa.filters").mel
+
 
 class MelSpectrogramFeatures(nn.Module):
     """
@@ -97,7 +102,7 @@ class MelSpectrogramFeatures(nn.Module):
 
         y = audio
         if len(list(self.mel_basis.keys())) == 0:
-            mel = librosa_mel_fn(sr=self.sampling_rate, n_fft=self.filter_length, n_mels=self.n_mel_channels, fmin=self.mel_fmin, fmax=self.mel_fmax)
+            mel = _librosa_mel_fn()(sr=self.sampling_rate, n_fft=self.filter_length, n_mels=self.n_mel_channels, fmin=self.mel_fmin, fmax=self.mel_fmax)
             self.mel_basis[str(self.mel_fmax)+'_'+str(y.device)] = torch.from_numpy(mel).float().to(y.device)
             self.hann_window[str(y.device)] = torch.hann_window(self.win_length).to(y.device)
 
