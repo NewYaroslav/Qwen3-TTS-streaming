@@ -1664,6 +1664,7 @@ class Qwen3TTSTalkerModel(Qwen3TTSTalkerTextPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        skip_prefill_causal_mask: bool = False,
         **flash_attn_kwargs: Unpack[FlashAttentionKwargs],
     ) -> BaseModelOutputWithPast:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -1706,15 +1707,18 @@ class Qwen3TTSTalkerModel(Qwen3TTSTalkerTextPreTrainedModel):
         else:
             text_position_ids = position_ids[0]
         
-        mask_function = create_causal_mask if self.config.sliding_window is None else create_sliding_window_causal_mask
-        causal_mask = mask_function(
-            config=self.config,
-            input_embeds=inputs_embeds,
-            attention_mask=attention_mask,
-            cache_position=cache_position,
-            past_key_values=past_key_values,
-            position_ids=text_position_ids,
-        )
+        if skip_prefill_causal_mask:
+            causal_mask = None
+        else:
+            mask_function = create_causal_mask if self.config.sliding_window is None else create_sliding_window_causal_mask
+            causal_mask = mask_function(
+                config=self.config,
+                input_embeds=inputs_embeds,
+                attention_mask=attention_mask,
+                cache_position=cache_position,
+                past_key_values=past_key_values,
+                position_ids=text_position_ids,
+            )
 
         hidden_states = inputs_embeds
 
@@ -1878,6 +1882,7 @@ class Qwen3TTSTalkerForConditionalGeneration(Qwen3TTSTalkerTextPreTrainedModel, 
         subtalker_top_p=None,
         subtalker_top_k=None,
         subtalker_temperature=None,
+        skip_prefill_causal_mask=False,
         **kwargs,
     ) -> CausalLMOutputWithPast:
         r"""
@@ -1972,6 +1977,7 @@ class Qwen3TTSTalkerForConditionalGeneration(Qwen3TTSTalkerTextPreTrainedModel, 
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             cache_position=cache_position,
+            skip_prefill_causal_mask=skip_prefill_causal_mask,
             **kwargs,
         )
 
