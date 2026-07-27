@@ -51,6 +51,19 @@ from .configuration_qwen3_tts import (Qwen3TTSConfig,
 logger = logging.get_logger(__name__)
 
 
+def _cache_seq_length(past_key_values) -> int:
+    if past_key_values is None:
+        return 0
+    if hasattr(past_key_values, "get_seq_length"):
+        return int(past_key_values.get_seq_length())
+    if len(past_key_values) == 0:
+        return 0
+    first_layer = past_key_values[0]
+    if not first_layer:
+        return 0
+    return int(first_layer[0].shape[-2])
+
+
 class GradientCheckpointingLayer(nn.Module):
     """Minimal inference-compatible replacement for Transformers' layer base."""
 
@@ -1683,6 +1696,8 @@ class Qwen3TTSTalkerModel(Qwen3TTSTalkerTextPreTrainedModel):
                 )
                 use_cache = False
 
+        cache_position_created_locally = cache_position is None
+
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache()
 
@@ -1708,6 +1723,16 @@ class Qwen3TTSTalkerModel(Qwen3TTSTalkerTextPreTrainedModel):
             text_position_ids = position_ids[0]
         
         if skip_prefill_causal_mask:
+            if inputs_embeds.shape[1] <= 1:
+                raise ValueError("skip_prefill_causal_mask is only valid for prefill calls")
+            if not cache_position_created_locally:
+                raise ValueError("skip_prefill_causal_mask requires internally constructed cache_position")
+            if _cache_seq_length(past_key_values) != 0:
+                raise ValueError("skip_prefill_causal_mask requires an empty KV cache")
+            if self.config.sliding_window is not None:
+                raise ValueError("skip_prefill_causal_mask is not valid with sliding-window attention")
+            if getattr(self.config, "_attn_implementation", "eager") not in {"eager", "sdpa"}:
+                raise ValueError("skip_prefill_causal_mask is only validated for eager/sdpa attention")
             causal_mask = None
         else:
             mask_function = create_causal_mask if self.config.sliding_window is None else create_sliding_window_causal_mask
@@ -1966,6 +1991,18 @@ class Qwen3TTSTalkerForConditionalGeneration(Qwen3TTSTalkerTextPreTrainedModel, 
                 position_ids = position_ids.view(1, -1).expand(batch_size, -1)
                 position_ids = position_ids.add(delta)
                 position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
+
+        if skip_prefill_causal_mask:
+            if generation_step != -1:
+                raise ValueError("skip_prefill_causal_mask is only valid for prefill calls")
+            if cache_position is not None:
+                raise ValueError("skip_prefill_causal_mask requires internally constructed cache_position")
+            if past_key_values is not None:
+                raise ValueError("skip_prefill_causal_mask requires an empty caller-provided KV cache")
+            if self.model.config.sliding_window is not None:
+                raise ValueError("skip_prefill_causal_mask is not valid with sliding-window attention")
+            if getattr(self.model.config, "_attn_implementation", "eager") not in {"eager", "sdpa"}:
+                raise ValueError("skip_prefill_causal_mask is only validated for eager/sdpa attention")
 
         outputs: BaseModelOutputWithPast = self.model(
             input_ids=None,
