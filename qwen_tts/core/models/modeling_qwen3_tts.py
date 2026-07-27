@@ -1723,6 +1723,8 @@ class Qwen3TTSTalkerModel(Qwen3TTSTalkerTextPreTrainedModel):
             text_position_ids = position_ids[0]
         
         if skip_prefill_causal_mask:
+            if attention_mask is not None:
+                raise ValueError("skip_prefill_causal_mask requires attention_mask=None")
             if inputs_embeds.shape[1] <= 1:
                 raise ValueError("skip_prefill_causal_mask is only valid for prefill calls")
             if not cache_position_created_locally:
@@ -1972,6 +1974,7 @@ class Qwen3TTSTalkerForConditionalGeneration(Qwen3TTSTalkerTextPreTrainedModel, 
                 inputs_embeds = inputs_embeds + trailing_text_hidden[:, generation_step].unsqueeze(1)
             else:
                 inputs_embeds = inputs_embeds + tts_pad_embed
+        position_ids = None
         if attention_mask is not None:
             if (
                 cache_position is None
@@ -1995,6 +1998,8 @@ class Qwen3TTSTalkerForConditionalGeneration(Qwen3TTSTalkerTextPreTrainedModel, 
         if skip_prefill_causal_mask:
             if generation_step != -1:
                 raise ValueError("skip_prefill_causal_mask is only valid for prefill calls")
+            if attention_mask is not None:
+                raise ValueError("skip_prefill_causal_mask requires attention_mask=None")
             if cache_position is not None:
                 raise ValueError("skip_prefill_causal_mask requires internally constructed cache_position")
             if past_key_values is not None:
