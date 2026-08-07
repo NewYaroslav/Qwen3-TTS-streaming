@@ -2126,6 +2126,7 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
 
         self.speech_tokenizer = None
         self.generate_config = None
+        self.last_stream_completion = None
 
         self.supported_speakers = self.config.talker_config.spk_id.keys()
         self.supported_languages = ["auto"]
@@ -2720,6 +2721,10 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
         Yields:
             tuple[np.ndarray, int]: (pcm_chunk as float32 array, sample_rate)
         """
+        # This is set only after the generator naturally runs to completion.
+        # Consumers must not infer EOS from a closed or cancelled generator.
+        self.last_stream_completion = None
+
         # Build talker inputs
         talker_input_embeds, talker_attention_mask, trailing_text_hiddens, tts_pad_embed = \
             self._build_talker_inputs(
@@ -2793,6 +2798,9 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
         decoded_tail: Optional[np.ndarray] = None
         frames_since_emit = 0
         total_frames_emitted = 0  # Track how many frames we've already emitted audio for
+        termination_reason = "max_frames"
+        terminal_token_id = None
+        terminal_step_index = max(0, max_frames - 1)
 
         for step_idx in range(max_frames):
             # Mark step begin for CUDA graphs to avoid tensor overwrite errors
@@ -2827,6 +2835,9 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
             # Check for EOS in first codebook ON GPU (avoids CPU sync bottleneck)
             # EOS token is out of range for speech tokenizer, so we must not include it
             if codec_ids[0, 0] == eos_id:
+                termination_reason = "eos"
+                terminal_token_id = int(eos_id)
+                terminal_step_index = step_idx
                 break
 
             # Keep on GPU to avoid CPU<->GPU transfers during decode
@@ -2916,6 +2927,22 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
 
             # Debug removed for performance: flush done
             yield wav, sr
+
+        generated_steps = len(codes_buffer)
+        hit_eos = termination_reason == "eos"
+        self.last_stream_completion = {
+            "trace_kind": "upstream_streaming_completion_v1",
+            "termination_reason": termination_reason,
+            "terminal_token_id": terminal_token_id,
+            "terminal_step_index": terminal_step_index,
+            "codec_frame_count": generated_steps,
+            "generated_steps": generated_steps,
+            "emitted_steps": generated_steps,
+            "hit_eos": hit_eos,
+            "hit_max_new_tokens": False,
+            "hit_max_seq_len": False,
+            "hit_max_frames": not hit_eos,
+        }
 
 
 __all__ = [
