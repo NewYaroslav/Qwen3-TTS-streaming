@@ -1375,6 +1375,9 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(Qwen3TTSPreTraine
         # Generation stage
         else:
             inputs_embeds = self.model.get_input_embeddings()[generation_steps - 1](input_ids)
+        compute_dtype = getattr(self, "_bridge_compute_dtype", None)
+        if compute_dtype is not None:
+            inputs_embeds = inputs_embeds.to(dtype=compute_dtype)
         inputs_embeds = self.small_to_mtp_projection(inputs_embeds)
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
