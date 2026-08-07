@@ -947,6 +947,15 @@ class Qwen3TTSTalkerTextMLP(nn.Module):
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
+        compute_dtype = getattr(self, "_bridge_compute_dtype", None)
+        if compute_dtype is not None:
+            gate = self.gate_proj(x)
+            up = self.up_proj(x)
+            product = self.act_fn(gate).to(dtype=compute_dtype) * up.to(
+                dtype=compute_dtype
+            )
+            down_proj = self.down_proj(product)
+            return down_proj.to(dtype=x.dtype)
         down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
         return down_proj
 
